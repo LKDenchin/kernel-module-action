@@ -4,8 +4,7 @@ on: [push]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # 小米15 对应的内核版本分支
-  GKI_VERSION: android15-6.6
+  GKI_VERSION: android15-6.6 # 小米15 对应的内核分支
 
 jobs:
   build:
@@ -17,18 +16,24 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential libelf-dev libssl-dev bison flex llvm lld clang
+          sudo apt-get install -y bc build-essential libelf-dev libssl-dev bison flex llvm lld clang gcc-aarch64-linux-gnu
 
       - name: Download Android Kernel Headers
-        # 直接拉取 GKI 的完整内核源码树（最稳妥，防止缺少头文件）
         run: |
           git clone --depth 1 https://android.googlesource.com/kernel/common -b ${{ env.GKI_VERSION }} $GITHUB_WORKSPACE/kernel-source
 
+      - name: Configure Kernel
+        # 这是修复问题的核心步骤
+        run: |
+          cd $GITHUB_WORKSPACE/kernel-source
+          # 1. 生成 GKI 默认配置
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 gki_defconfig
+          # 2. 准备编译模块所需的头文件和脚本
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- LLVM=1 modules_prepare
+
       - name: Build Module
         run: |
-          cd $GITHUB_WORKSPACE
-          # 使用系统自带的 Clang，但指定 ARM64 目标
-          # 小米15 是骁龙8 Elite，必须开启 LLVM 编译
+          # 编译你的 tcp_pixie.ko
           make -C $GITHUB_WORKSPACE/kernel-source \
                M=$GITHUB_WORKSPACE \
                ARCH=arm64 \
@@ -38,11 +43,12 @@ jobs:
                modules
 
       - name: Check Artifact
-        # 在上传前先检查一下生成的 ko 是否真的是 ARM64 格式
         run: |
-          KO_FILE=$(find . -name "*.ko")
-          echo "Checking $KO_FILE"
+          KO_FILE=$(find . -maxdepth 1 -name "*.ko")
+          if [ -z "$KO_FILE" ]; then echo "No .ko found"; exit 1; fi
           file $KO_FILE
+          # 打印 vermagic 看看是否匹配
+          modinfo $KO_FILE | grep vermagic
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
