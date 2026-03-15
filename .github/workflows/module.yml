@@ -1,49 +1,51 @@
-name: Build Kernel Module
+name: Build Kmod for Xiaomi 15 (ARM64)
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+on: [push]
 
-# 设置环境变量以适配 2026 年的 Node.js 24 要求
 env:
+  # 强制使用 Node.js 24 适配 2026 规范
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
-    name: Build on Ubuntu 22.04
-    runs-on: ubuntu-22.04
-    
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential linux-headers-$(uname -r)
+          sudo apt-get install -y bc build-essential libelf-dev libssl-dev bison flex
 
-      - name: Build the kernel module
-        run: make
-
-      - name: Rename and Prepare Artifact
-        # 使用 find 命令自动抓取生成的 .ko 文件，避免手动写错名字
-        # 它会将 xxx.ko 重命名为 xxx_ubuntu-22.04.ko
+      - name: Set up Android Clang
+        # 下载 Android NDK 预构建的 Clang 编译器
         run: |
-          KO_FILE=$(find . -maxdepth 1 -name "*.ko" -print -quit)
-          if [ -z "$KO_FILE" ]; then
-            echo "Error: No .ko file found after make!"
-            exit 1
-          fi
-          NEW_NAME="${KO_FILE%.ko}_ubuntu-22.04.ko"
-          mv "$KO_FILE" "$NEW_NAME"
-          echo "FINAL_KO=$NEW_NAME" >> $GITHUB_ENV
+          mkdir -p $GITHUB_WORKSPACE/clang
+          cd $GITHUB_WORKSPACE/clang
+          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522830.tar.gz
+          tar -xzf clang-r522830.tar.gz
 
-      - name: Upload Artifact
+      - name: Get Android GKI Headers
+        # 小米15 通常使用 android15-6.6 或类似内核
+        # 建议先在手机上执行 uname -r 确认版本，此处以 6.6 为例
+        run: |
+          git clone --depth 1 https://android.googlesource.com/kernel/common -b android15-6.6 $GITHUB_WORKSPACE/kernel-source
+
+      - name: Build Module
+        run: |
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          # 关键参数：使用 LLVM 编译，指定架构为 arm64
+          make -C $GITHUB_WORKSPACE/kernel-source \
+               M=$GITHUB_WORKSPACE \
+               ARCH=arm64 \
+               CROSS_COMPILE=aarch64-linux-gnu- \
+               LLVM=1 \
+               LLVM_IAS=1 \
+               modules
+
+      - name: Upload .ko
         uses: actions/upload-artifact@v4
         with:
-          name: kmod-ubuntu-22.04
-          # 使用上面步骤保存的环境变量
-          path: ${{ env.FINAL_KO }}
-          retention-days: 7
+          name: tcp_pixie_xiaomi15
+          path: ./*.ko
