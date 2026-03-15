@@ -6,44 +6,44 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# 设置环境变量以适配 2026 年的 Node.js 24 要求
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # 即使某个平台的编译失败，也不要取消其他平台的编译
-      fail-fast: false 
-      matrix:
-        # 在这里定义你需要支持的具体平台
-        # GitHub 提供的 runner 自带了不同版本的 Ubuntu 和内核
-        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
-
+    name: Build on Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Check kernel version
-        run: uname -r
-
-      - name: Install build dependencies and kernel headers
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          # 安装编译工具链和当前 runner 对应版本的内核头文件
           sudo apt-get install -y build-essential linux-headers-$(uname -r)
 
       - name: Build the kernel module
-        # 假设你的源码和 Makefile 在仓库根目录
         run: make
 
-      - name: Rename artifact with OS info (Optional)
-        # 为了避免不同平台的产物同名，可以给 .ko 文件加上平台后缀
-        # 请将 my_module.ko 替换为你实际的模块名
-        run: mv my_module.ko my_module_${{ matrix.os }}.ko
+      - name: Rename and Prepare Artifact
+        # 使用 find 命令自动抓取生成的 .ko 文件，避免手动写错名字
+        # 它会将 xxx.ko 重命名为 xxx_ubuntu-22.04.ko
+        run: |
+          KO_FILE=$(find . -maxdepth 1 -name "*.ko" -print -quit)
+          if [ -z "$KO_FILE" ]; then
+            echo "Error: No .ko file found after make!"
+            exit 1
+          fi
+          NEW_NAME="${KO_FILE%.ko}_ubuntu-22.04.ko"
+          mv "$KO_FILE" "$NEW_NAME"
+          echo "FINAL_KO=$NEW_NAME" >> $GITHUB_ENV
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kmod-artifact-${{ matrix.os }}
-          path: ./*.ko
-          # 如果编译产物只保留较短时间可以设置过期天数
+          name: kmod-ubuntu-22.04
+          # 使用上面步骤保存的环境变量
+          path: ${{ env.FINAL_KO }}
           retention-days: 7
