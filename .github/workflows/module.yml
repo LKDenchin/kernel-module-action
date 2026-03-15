@@ -1,10 +1,11 @@
-name: Build Kmod for Xiaomi 15 (ARM64)
+name: Build Kmod for Xiaomi 15
 
 on: [push]
 
 env:
-  # 强制使用 Node.js 24 适配 2026 规范
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # 小米15 对应的内核版本分支
+  GKI_VERSION: android15-6.6
 
 jobs:
   build:
@@ -16,26 +17,18 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc build-essential libelf-dev libssl-dev bison flex
+          sudo apt-get install -y bc build-essential libelf-dev libssl-dev bison flex llvm lld clang
 
-      - name: Set up Android Clang
-        # 下载 Android NDK 预构建的 Clang 编译器
+      - name: Download Android Kernel Headers
+        # 直接拉取 GKI 的完整内核源码树（最稳妥，防止缺少头文件）
         run: |
-          mkdir -p $GITHUB_WORKSPACE/clang
-          cd $GITHUB_WORKSPACE/clang
-          curl -LO https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522830.tar.gz
-          tar -xzf clang-r522830.tar.gz
-
-      - name: Get Android GKI Headers
-        # 小米15 通常使用 android15-6.6 或类似内核
-        # 建议先在手机上执行 uname -r 确认版本，此处以 6.6 为例
-        run: |
-          git clone --depth 1 https://android.googlesource.com/kernel/common -b android15-6.6 $GITHUB_WORKSPACE/kernel-source
+          git clone --depth 1 https://android.googlesource.com/kernel/common -b ${{ env.GKI_VERSION }} $GITHUB_WORKSPACE/kernel-source
 
       - name: Build Module
         run: |
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          # 关键参数：使用 LLVM 编译，指定架构为 arm64
+          cd $GITHUB_WORKSPACE
+          # 使用系统自带的 Clang，但指定 ARM64 目标
+          # 小米15 是骁龙8 Elite，必须开启 LLVM 编译
           make -C $GITHUB_WORKSPACE/kernel-source \
                M=$GITHUB_WORKSPACE \
                ARCH=arm64 \
@@ -44,7 +37,14 @@ jobs:
                LLVM_IAS=1 \
                modules
 
-      - name: Upload .ko
+      - name: Check Artifact
+        # 在上传前先检查一下生成的 ko 是否真的是 ARM64 格式
+        run: |
+          KO_FILE=$(find . -name "*.ko")
+          echo "Checking $KO_FILE"
+          file $KO_FILE
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tcp_pixie_xiaomi15
