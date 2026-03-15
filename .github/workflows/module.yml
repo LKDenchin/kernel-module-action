@@ -1,0 +1,49 @@
+name: Build Kernel Module
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 即使某个平台的编译失败，也不要取消其他平台的编译
+      fail-fast: false 
+      matrix:
+        # 在这里定义你需要支持的具体平台
+        # GitHub 提供的 runner 自带了不同版本的 Ubuntu 和内核
+        os: [ubuntu-20.04, ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check kernel version
+        run: uname -r
+
+      - name: Install build dependencies and kernel headers
+        run: |
+          sudo apt-get update
+          # 安装编译工具链和当前 runner 对应版本的内核头文件
+          sudo apt-get install -y build-essential linux-headers-$(uname -r)
+
+      - name: Build the kernel module
+        # 假设你的源码和 Makefile 在仓库根目录
+        run: make
+
+      - name: Rename artifact with OS info (Optional)
+        # 为了避免不同平台的产物同名，可以给 .ko 文件加上平台后缀
+        # 请将 my_module.ko 替换为你实际的模块名
+        run: mv my_module.ko my_module_${{ matrix.os }}.ko
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kmod-artifact-${{ matrix.os }}
+          path: ./*.ko
+          # 如果编译产物只保留较短时间可以设置过期天数
+          retention-days: 7
